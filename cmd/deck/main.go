@@ -140,6 +140,7 @@ type options struct {
 	controllerManager     prowflagutil.ControllerManagerOptions
 	dryRun                bool
 	tenantIDs             prowflagutil.Strings
+	basePath              string
 }
 
 func (o *options) Validate() error {
@@ -180,6 +181,7 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 	fs.BoolVar(&o.spyglass, "spyglass", false, "Use Prow built-in job viewing instead of Gubernator")
 	fs.StringVar(&o.spyglassFilesLocation, "spyglass-files-location", fmt.Sprintf("%s%s", os.Getenv("KO_DATA_PATH"), defaultSpyglassFilesLocation), "Location of the static files for spyglass.")
 	fs.StringVar(&o.staticFilesLocation, "static-files-location", fmt.Sprintf("%s%s", os.Getenv("KO_DATA_PATH"), defaultStaticFilesLocation), "Path to the static files")
+	fs.StringVar(&o.basePath, "base-path", "/", "Base path prefix under which Deck is served (e.g. /prow). Default is /. Must start with '/'.")
 	fs.StringVar(&o.templateFilesLocation, "template-files-location", fmt.Sprintf("%s%s", os.Getenv("KO_DATA_PATH"), defaultTemplateFilesLocation), "Path to the template files")
 	fs.BoolVar(&o.gcsCookieAuth, "gcs-cookie-auth", false, "Use storage.cloud.google.com instead of signed URLs")
 	fs.BoolVar(&o.rerunCreatesJob, "rerun-creates-job", false, "Change the re-run option in Deck to actually create the job. **WARNING:** Only use this with non-public deck instances, otherwise strangers can DOS your Prow instance")
@@ -273,6 +275,16 @@ func v(fragment string, children ...simplifypath.Node) simplifypath.Node {
 	return simplifypath.V(fragment, children...)
 }
 
+func withBasePath(base, p string) string {
+	if base == "/" {
+		return p
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return strings.TrimSuffix(base, "/") + p
+}
+
 func main() {
 	logrusutil.ComponentInit()
 
@@ -311,19 +323,51 @@ func main() {
 
 	mux := http.NewServeMux()
 	// setup common handlers for local and deployed runs
-	mux.Handle("/static/", http.StripPrefix("/static", staticHandlerFromDir(o.staticFilesLocation)))
-	mux.Handle("/config", gziphandler.GzipHandler(handleConfig(cfg, logrus.WithField("handler", "/config"))))
-	mux.Handle("/plugin-config", gziphandler.GzipHandler(handlePluginConfig(pluginAgent, logrus.WithField("handler", "/plugin-config"))))
-	mux.Handle("/favicon.ico", gziphandler.GzipHandler(handleFavicon(o.staticFilesLocation, cfg)))
+	// mux.Handle("/static/", http.StripPrefix("/static", staticHandlerFromDir(o.staticFilesLocation)))
+	// mux.Handle("/config", gziphandler.GzipHandler(handleConfig(cfg, logrus.WithField("handler", "/config"))))
+	// mux.Handle("/plugin-config", gziphandler.GzipHandler(handlePluginConfig(pluginAgent, logrus.WithField("handler", "/plugin-config"))))
+	// mux.Handle("/favicon.ico", gziphandler.GzipHandler(handleFavicon(o.staticFilesLocation, cfg)))
+	mux.Handle(withBasePath(o.basePath, "/static/"),
+		http.StripPrefix(withBasePath(o.basePath, "/static"), staticHandlerFromDir(o.staticFilesLocation)))
+
+	mux.Handle(withBasePath(o.basePath, "/config"),
+		gziphandler.GzipHandler(handleConfig(cfg, logrus.WithField("handler", "/config"))))
+
+	mux.Handle(withBasePath(o.basePath, "/plugin-config"),
+		gziphandler.GzipHandler(handlePluginConfig(pluginAgent, logrus.WithField("handler", "/plugin-config"))))
+
+	mux.Handle(withBasePath(o.basePath, "/favicon.ico"),
+		gziphandler.GzipHandler(handleFavicon(o.staticFilesLocation, cfg)))
+
+	mux.Handle(withBasePath(o.basePath, "/pr"),
+		gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "pr.html", nil)))
+
+	mux.Handle(withBasePath(o.basePath, "/command-help"),
+		gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "command-help.html", nil)))
+
+	mux.Handle(withBasePath(o.basePath, "/plugin-help"),
+		http.RedirectHandler(withBasePath(o.basePath, "/command-help"), http.StatusMovedPermanently))
+
+	mux.Handle(withBasePath(o.basePath, "/tide"),
+		gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "tide.html", nil)))
+
+	mux.Handle(withBasePath(o.basePath, "/tide-history"),
+		gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "tide-history.html", nil)))
+
+	mux.Handle(withBasePath(o.basePath, "/plugins"),
+		gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "plugins.html", nil)))
+
+	mux.Handle(withBasePath(o.basePath, "/configured-jobs/"),
+		gziphandler.GzipHandler(handleConfiguredJobs(o, cfg, logrus.WithField("handler", "/configured-jobs"))))
 
 	// Set up handlers for template pages.
-	mux.Handle("/pr", gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "pr.html", nil)))
-	mux.Handle("/command-help", gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "command-help.html", nil)))
-	mux.Handle("/plugin-help", http.RedirectHandler("/command-help", http.StatusMovedPermanently))
-	mux.Handle("/tide", gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "tide.html", nil)))
-	mux.Handle("/tide-history", gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "tide-history.html", nil)))
-	mux.Handle("/plugins", gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "plugins.html", nil)))
-	mux.Handle("/configured-jobs/", gziphandler.GzipHandler(handleConfiguredJobs(o, cfg, logrus.WithField("handler", "/configured-jobs"))))
+	// mux.Handle("/pr", gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "pr.html", nil)))
+	// mux.Handle("/command-help", gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "command-help.html", nil)))
+	// mux.Handle("/plugin-help", http.RedirectHandler("/command-help", http.StatusMovedPermanently))
+	// mux.Handle("/tide", gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "tide.html", nil)))
+	// mux.Handle("/tide-history", gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "tide-history.html", nil)))
+	// mux.Handle("/plugins", gziphandler.GzipHandler(handleSimpleTemplate(o, cfg, "plugins.html", nil)))
+	// mux.Handle("/configured-jobs/", gziphandler.GzipHandler(handleConfiguredJobs(o, cfg, logrus.WithField("handler", "/configured-jobs"))))
 
 	runLocal := o.pregeneratedData != ""
 
@@ -430,17 +474,23 @@ func main() {
 		return cfg().Deck.GetRerunAuthConfig(jobSpec)
 	}
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
+	mux.HandleFunc(withBasePath(o.basePath, "/"), func(w http.ResponseWriter, r *http.Request) {
+		cleanPath := strings.TrimSuffix(r.URL.Path, "/")
+		cleanBase := strings.TrimSuffix(o.basePath, "/")
+		if cleanPath != cleanBase {
 			fallbackHandler(w, r)
 			return
 		}
+
 		indexHandler := handleSimpleTemplate(o, cfg, "index.html", struct {
+			BasePath        string
 			SpyglassEnabled bool
 			ReRunCreatesJob bool
 		}{
+			BasePath:        o.basePath,
 			SpyglassEnabled: o.spyglass,
-			ReRunCreatesJob: o.rerunCreatesJob})
+			ReRunCreatesJob: o.rerunCreatesJob,
+		})
 		indexHandler(w, r)
 	})
 
@@ -449,10 +499,19 @@ func main() {
 
 	// setup prod only handlers. These handlers can work with runlocal as long
 	// as ja is properly mocked, more specifically pjListingClient inside ja
-	mux.Handle("/data.js", gziphandler.GzipHandler(handleData(ja, logrus.WithField("handler", "/data.js"))))
-	mux.Handle("/prowjobs.js", gziphandler.GzipHandler(handleProwJobs(ja, logrus.WithField("handler", "/prowjobs.js"))))
-	mux.Handle("/badge.svg", gziphandler.GzipHandler(handleBadge(ja)))
-	mux.Handle("/log", gziphandler.GzipHandler(handleLog(ja, logrus.WithField("handler", "/log"))))
+	// mux.Handle("/data.js", gziphandler.GzipHandler(handleData(ja, logrus.WithField("handler", "/data.js"))))
+	mux.Handle(withBasePath(o.basePath, "/data.js"),
+		gziphandler.GzipHandler(handleData(ja, logrus.WithField("handler", "/data.js"))))
+	mux.Handle(withBasePath(o.basePath, "/prowjobs.js"),
+    gziphandler.GzipHandler(handleProwJobs(ja, logrus.WithField("handler", "/prowjobs.js"))))
+    mux.Handle(withBasePath(o.basePath, "/badge.svg"),
+    gziphandler.GzipHandler(handleBadge(ja)))
+    mux.Handle(withBasePath(o.basePath, "/log"),
+    gziphandler.GzipHandler(handleLog(ja, logrus.WithField("handler", "/log"))))
+
+	// mux.Handle("/prowjobs.js", gziphandler.GzipHandler(handleProwJobs(ja, logrus.WithField("handler", "/prowjobs.js"))))
+	// mux.Handle("/badge.svg", gziphandler.GzipHandler(handleBadge(ja)))
+	// mux.Handle("/log", gziphandler.GzipHandler(handleLog(ja, logrus.WithField("handler", "/log"))))
 
 	if o.spyglass {
 		initSpyglass(cfg, o, mux, ja, githubClient, gitClient)
@@ -563,7 +622,9 @@ func prodOnlyMain(cfg config.Getter, pluginAgent *plugins.ConfigAgent, authCfgGe
 	}
 
 	// prowjob still needs prowJobClient for retrieving log
-	mux.Handle("/prowjob", gziphandler.GzipHandler(handleProwJob(prowJobClient, logrus.WithField("handler", "/prowjob"))))
+	// mux.Handle("/prowjob", gziphandler.GzipHandler(handleProwJob(prowJobClient, logrus.WithField("handler", "/prowjob"))))
+	mux.Handle(withBasePath(o.basePath, "/prowjob"), gziphandler.GzipHandler(handleProwJob(prowJobClient, logrus.WithField("handler", "/prowjob"))))
+
 
 	if o.hookURL != "" {
 		mux.Handle("/plugin-help.js",
@@ -695,7 +756,8 @@ func initSpyglass(cfg config.Getter, o options, mux *http.ServeMux, ja *jobs.Job
 	sg := spyglass.New(ctx, ja, cfg, opener, o.gcsCookieAuth)
 	sg.Start()
 
-	mux.Handle("/spyglass/static/", http.StripPrefix("/spyglass/static", staticHandlerFromDir(o.spyglassFilesLocation)))
+	// mux.Handle("/spyglass/static/", http.StripPrefix("/spyglass/static", staticHandlerFromDir(o.spyglassFilesLocation)))
+	mux.Handle(withBasePath(o.basePath, "/spyglass/static/"), http.StripPrefix(withBasePath(o.basePath, "/spyglass/static"), staticHandlerFromDir(o.spyglassFilesLocation)))
 	mux.Handle("/spyglass/lens/", gziphandler.GzipHandler(http.StripPrefix("/spyglass/lens/", handleArtifactView(o, sg, cfg))))
 	mux.Handle("/view/", gziphandler.GzipHandler(handleRequestJobViews(sg, cfg, o, logrus.WithField("handler", "/view"))))
 	mux.Handle("/job-history/", gziphandler.GzipHandler(handleJobHistory(o, cfg, opener, logrus.WithField("handler", "/job-history"))))

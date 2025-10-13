@@ -1,8 +1,9 @@
 {{define "title"}}Command Help{{end}}
 {{define "scripts"}}
-<link rel="stylesheet" href="/static/dialog-polyfill.css?v={{deckVersion}}">
-<script type="text/javascript" src="/static/command_help_bundle.min.js?v={{deckVersion}}"></script>
-<script type="text/javascript" src="plugin-help.js?var=allHelp"></script>
+  {{$base := printf "%s/" (strings.TrimSuffix .BasePath "/")}}
+  <link rel="stylesheet" href="{{$base}}static/dialog-polyfill.css?v={{deckVersion}}">
+  <script type="text/javascript" src="{{$base}}static/command_help_bundle.min.js?v={{deckVersion}}"></script>
+  <script type="text/javascript" src="{{$base}}plugin-help.js?var=allHelp"></script>
 {{end}}
 {{define "content"}}
 <aside>

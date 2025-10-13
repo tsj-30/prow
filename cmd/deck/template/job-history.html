@@ -1,6 +1,7 @@
 {{define "title"}}Job History: {{.Name}}{{end}}
 {{define "scripts"}}
-<script type="text/javascript" src="/static/job_history_bundle.min.js?v={{deckVersion}}"></script>
+{{$base := printf "%s/" (strings.TrimSuffix .BasePath "/")}}
+<script type="text/javascript" src="{{$base}}static/job_history_bundle.min.js?v={{deckVersion}}"></script>
 <script type="text/javascript">
   var allBuilds = {{.Builds}};
 </script>
@@ -42,13 +43,13 @@
   <table style="max-width: 1000px">
     <tr>
       {{if .OlderLink}}
-      <td><a href="{{.OlderLink}}">&lt;- Older Runs</a></td>
+      <td><a href="{{$base}}{{.OlderLink}}">&lt;- Older Runs</a></td>
       {{end}}
       {{if .NewerLink}}
-      <td><a href="{{.NewerLink}}">Newer Runs -&gt;</a></td>
+      <td><a href="{{$base}}{{.NewerLink}}">Newer Runs -&gt;</a></td>
       {{end}}
       {{if .LatestLink}}
-      <td><a href="{{.LatestLink}}">Latest Runs</a></td>
+      <td><a href="{{$base}}{{.LatestLink}}">Latest Runs</a></td>
       {{end}}
       <td></td>
     </tr>

@@ -1,6 +1,7 @@
 {{define "title"}}Configured Jobs{{end}}
 {{define "scripts"}}
-<link rel="stylesheet" href="/static/dialog-polyfill.css?v={{deckVersion}}">
+{{$base := printf "%s/" (strings.TrimSuffix .BasePath "/")}}
+<link rel="stylesheet" href="{{$base}}static/dialog-polyfill.css?v={{deckVersion}}">
 {{end}}
 {{define "content"}}
 <ul>
